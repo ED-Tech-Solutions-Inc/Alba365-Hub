@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POS Hub v2 Setup</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f8fafc; color: #1e293b;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    }
+    .container { max-width: 480px; width: 100%; padding: 24px; }
+    .card {
+      background: white; border-radius: 12px; padding: 32px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+      border: 1px solid #e2e8f0;
+    }
+    .logo { text-align: center; margin-bottom: 24px; }
+    .logo svg { width: 48px; height: 48px; color: #4f46e5; }
+    h1 { font-size: 22px; font-weight: 700; text-align: center; margin-bottom: 4px; }
+    .subtitle { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 24px; }
+    .version { text-align: center; color: #94a3b8; font-size: 12px; margin-top: -18px; margin-bottom: 24px; }
+    label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+    input[type="text"] {
+      width: 100%; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px;
+      font-size: 15px; outline: none; transition: border-color 0.15s;
+    }
+    input[type="text"]:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+    .btn {
+      width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 15px;
+      font-weight: 600; cursor: pointer; transition: all 0.15s; margin-top: 16px;
+    }
+    .btn-primary { background: #4f46e5; color: white; }
+    .btn-primary:hover { background: #4338ca; }
+    .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+    .btn-secondary { background: #64748b; color: white; }
+    .btn-secondary:hover { background: #475569; }
+    .error { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-top: 12px; }
+    .code-display {
+      text-align: center; padding: 24px; background: #f1f5f9; border-radius: 8px;
+      margin: 16px 0;
+    }
+    .code {
+      font-family: 'SF Mono', 'Fira Code', monospace; font-size: 42px; font-weight: 700;
+      letter-spacing: 4px; color: #1e293b;
+    }
+    .timer { color: #64748b; font-size: 13px; margin-top: 8px; }
+    .timer.warning { color: #f59e0b; }
+    .timer.critical { color: #ef4444; }
+    .instructions {
+      background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+      padding: 14px; margin-top: 16px; font-size: 13px; color: #1e40af; line-height: 1.5;
+    }
+    .instructions ol { padding-left: 18px; }
+    .instructions li { margin-bottom: 4px; }
+    .spinner {
+      display: inline-block; width: 16px; height: 16px;
+      border: 2px solid #e2e8f0; border-top-color: #4f46e5;
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+      vertical-align: middle; margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .success-icon { text-align: center; margin: 16px 0; }
+    .success-icon svg { width: 64px; height: 64px; color: #22c55e; }
+    .success-text { text-align: center; font-size: 18px; font-weight: 600; color: #16a34a; }
+    .success-sub { text-align: center; font-size: 14px; color: #64748b; margin-top: 8px; }
+    .polling-status { text-align: center; font-size: 13px; color: #94a3b8; margin-top: 12px; }
+    .step-indicator { display: flex; justify-content: center; gap: 8px; margin-bottom: 20px; }
+    .step {
+      width: 8px; height: 8px; border-radius: 50%; background: #e2e8f0; transition: background 0.2s;
+    }
+    .step.active { background: #4f46e5; }
+    .step.done { background: #22c55e; }
+    .already-configured { text-align: center; padding: 16px; }
+    .already-configured p { color: #64748b; font-size: 14px; margin-top: 8px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="logo">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 17.25v-.228a4.5 4.5 0 0 0-.12-1.03l-2.268-9.64a3.375 3.375 0 0 0-3.285-2.602H7.923a3.375 3.375 0 0 0-3.285 2.602l-2.268 9.64a4.5 4.5 0 0 0-.12 1.03v.228m19.5 0a3 3 0 0 1-3 3H5.25a3 3 0 0 1-3-3m19.5 0a3 3 0 0 0-3-3H5.25a3 3 0 0 0-3 3m16.5 0h.008v.008h-.008v-.008Zm-3 0h.008v.008h-.008v-.008Z" />
+        </svg>
+      </div>
+      <h1>POS Hub v2 Setup</h1>
+      <p class="subtitle">Connect this hub server to your cloud account</p>
+      <p class="version">v2</p>
+
+      <div class="step-indicator">
+        <div class="step active" id="step1-dot"></div>
+        <div class="step" id="step2-dot"></div>
+        <div class="step" id="step3-dot"></div>
+      </div>
+
+      <!-- Step 1: Enter cloud URL -->
+      <div id="step1">
+        <label for="cloudUrl">Cloud Server URL</label>
+        <input type="text" id="cloudUrl" placeholder="https://your-pos.example.com" />
+        <button class="btn btn-primary" id="startBtn" onclick="startPairing()">
+          Start Pairing
+        </button>
+        <div id="initError" class="error hidden"></div>
+      </div>
+
+      <!-- Step 2: Show pairing code -->
+      <div id="step2" class="hidden">
+        <div class="code-display">
+          <div class="code" id="pairingCode">----</div>
+          <div class="timer" id="timer">5:00 remaining</div>
+        </div>
+        <div class="instructions">
+          <ol>
+            <li>Open your <strong>Location Portal</strong> in the cloud</li>
+            <li>Go to <strong>Terminals</strong> page</li>
+            <li>Enter this code in the <strong>Hub Pairing</strong> section</li>
+            <li>Click <strong>Confirm Pairing</strong></li>
+          </ol>
+        </div>
+        <div class="polling-status">
+          <span class="spinner"></span>
+          <span id="pollStatus">Waiting for admin confirmation...</span>
+        </div>
+        <button class="btn btn-secondary" onclick="cancelPairing()">Cancel</button>
+      </div>
+
+      <!-- Step 3: Success -->
+      <div id="step3" class="hidden">
+        <div class="success-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        </div>
+        <p class="success-text">Hub Paired Successfully!</p>
+        <p class="success-sub" id="successDetail">Connected and syncing with cloud.</p>
+        <button class="btn btn-primary" onclick="window.location.href='/api/diagnostics'" style="margin-top:24px">
+          Open Diagnostics
+        </button>
+      </div>
+
+      <!-- Already configured -->
+      <div id="alreadyConfigured" class="hidden">
+        <div class="already-configured">
+          <div class="success-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+          </div>
+          <p class="success-text">Hub Already Configured</p>
+          <p>This hub is already paired and syncing with the cloud.</p>
+          <button class="btn btn-primary" onclick="window.location.href='/api/diagnostics'" style="margin-top:16px">
+            Open Diagnostics
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let challengeId = null;
+    let expiresAt = null;
+    let pollInterval = null;
+    let timerInterval = null;
+
+    // Check if already configured on load
+    (async function checkConfig() {
+      try {
+        const res = await fetch('/api/setup/status');
+        const data = await res.json();
+        if (data.isRegistered) {
+          showStep('alreadyConfigured');
+        }
+      } catch (e) {
+        // Ignore - just show setup
+      }
+    })();
+
+    function showStep(step) {
+      ['step1', 'step2', 'step3', 'alreadyConfigured'].forEach(s => {
+        document.getElementById(s).classList.add('hidden');
+      });
+      document.getElementById(step).classList.remove('hidden');
+
+      const dots = { step1: 0, step2: 1, step3: 2, alreadyConfigured: 2 };
+      document.querySelectorAll('.step').forEach((el, i) => {
+        el.className = 'step' + (i < dots[step] ? ' done' : i === dots[step] ? ' active' : '');
+      });
+    }
+
+    async function startPairing() {
+      const urlInput = document.getElementById('cloudUrl');
+      const cloudUrl = urlInput.value.trim().replace(/\/+$/, '');
+      const errorEl = document.getElementById('initError');
+      const btn = document.getElementById('startBtn');
+
+      if (!cloudUrl) {
+        errorEl.textContent = 'Please enter the cloud server URL';
+        errorEl.classList.remove('hidden');
+        return;
+      }
+
+      try { new URL(cloudUrl); } catch {
+        errorEl.textContent = 'Invalid URL format. Example: https://your-pos.example.com';
+        errorEl.classList.remove('hidden');
+        return;
+      }
+
+      errorEl.classList.add('hidden');
+      btn.disabled = true;
+      btn.textContent = 'Connecting...';
+
+      try {
+        const res = await fetch('/api/setup/pair/init', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cloudApiUrl: cloudUrl }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to start pairing');
+        }
+
+        challengeId = data.challengeId;
+        expiresAt = new Date(data.expiresAt).getTime();
+
+        document.getElementById('pairingCode').textContent = data.code;
+        showStep('step2');
+
+        startTimer();
+        startPolling();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Start Pairing';
+      }
+    }
+
+    function startTimer() {
+      timerInterval = setInterval(() => {
+        const remaining = Math.max(0, expiresAt - Date.now());
+        const mins = Math.floor(remaining / 60000);
+        const secs = Math.floor((remaining % 60000) / 1000);
+        const timerEl = document.getElementById('timer');
+
+        timerEl.textContent = `${mins}:${secs.toString().padStart(2, '0')} remaining`;
+        timerEl.className = 'timer' + (remaining < 60000 ? ' critical' : remaining < 120000 ? ' warning' : '');
+
+        if (remaining <= 0) {
+          cancelPairing();
+          document.getElementById('initError').textContent = 'Pairing code expired. Please try again.';
+          document.getElementById('initError').classList.remove('hidden');
+        }
+      }, 1000);
+    }
+
+    function startPolling() {
+      pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/setup/pair/status?challengeId=${encodeURIComponent(challengeId)}`);
+          const data = await res.json();
+
+          if (data.status === 'paired') {
+            stopPolling();
+            document.getElementById('successDetail').textContent =
+              `Location ${data.locationId ? data.locationId.slice(0, 8) + '...' : ''} connected. Sync engines started.`;
+            showStep('step3');
+          } else if (data.status === 'expired') {
+            cancelPairing();
+            document.getElementById('initError').textContent = 'Pairing code expired. Please try again.';
+            document.getElementById('initError').classList.remove('hidden');
+          }
+        } catch (err) {
+          document.getElementById('pollStatus').textContent = 'Connection lost. Retrying...';
+        }
+      }, 3000);
+    }
+
+    function stopPolling() {
+      if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+      if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    }
+
+    function cancelPairing() {
+      stopPolling();
+      challengeId = null;
+      showStep('step1');
+    }
+  </script>
+</body>
+</html>

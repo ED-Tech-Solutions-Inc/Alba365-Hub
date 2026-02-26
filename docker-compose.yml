@@ -1,0 +1,32 @@
+# Alba365 Hub v2 — Fastify 5 + SQLite hub for Flutter POS
+# Usage: docker-compose up -d
+
+version: "3.8"
+
+services:
+  hub-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alba365-hub
+    ports:
+      - "4001:4001"
+    volumes:
+      - hub-v2-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=4001
+      - DB_PATH=/app/data/hub.db
+      - LOG_LEVEL=info
+      - ALLOWED_ORIGINS=*
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4001/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  hub-v2-data:
+    driver: local

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.db
+*.db-journal
+.env
+.env.*
+!.env.example
+.turbo/
+*.tgz
+.DS_Store
+Thumbs.db
