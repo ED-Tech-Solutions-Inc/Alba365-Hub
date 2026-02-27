@@ -134,6 +134,34 @@ export function registerSaleRoutes(app: FastifyInstance) {
     return { ...(sale as Record<string, unknown>), items, payments };
   });
 
+  // Email receipt
+  app.post("/api/sales/:id/email-receipt", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { email } = req.body as { email: string };
+    const db = getDb();
+
+    if (!email) {
+      reply.status(400);
+      return { error: "Email address is required" };
+    }
+
+    const sale = db.prepare("SELECT id, receipt_number FROM sales WHERE id = ?").get(id) as { id: string; receipt_number: string } | undefined;
+    if (!sale) {
+      reply.status(404);
+      return { error: "Sale not found" };
+    }
+
+    // Queue email to outbox for cloud to process (cloud has SMTP config)
+    transaction((txDb) => {
+      txDb.prepare(`
+        INSERT INTO outbox_queue (entity_type, entity_id, action, payload, priority, created_at)
+        VALUES ('sale', ?, 'email_receipt', ?, 5, datetime('now'))
+      `).run(id, JSON.stringify({ saleId: id, receiptNumber: sale.receipt_number, email }));
+    });
+
+    return { success: true, message: "Email receipt queued" };
+  });
+
   // Void sale
   app.post("/api/sales/:id/void", async (req, reply) => {
     const { id } = req.params as { id: string };

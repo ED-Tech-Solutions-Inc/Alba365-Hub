@@ -1221,6 +1221,49 @@ export function initializeSchema(db: Database.Database): void {
     );
 
     -- ============================================================
+    -- REFUNDS
+    -- ============================================================
+
+    CREATE TABLE IF NOT EXISTS refunds (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      location_id TEXT NOT NULL,
+      sale_id TEXT NOT NULL,
+      total REAL NOT NULL DEFAULT 0,
+      tax_refund REAL DEFAULT 0,
+      method TEXT NOT NULL DEFAULT 'ORIGINAL',
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
+      requested_by_id TEXT,
+      requested_by_name TEXT,
+      approved_by_id TEXT,
+      approved_by_name TEXT,
+      approved_at TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (sale_id) REFERENCES sales(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_refunds_sale ON refunds(sale_id);
+    CREATE INDEX IF NOT EXISTS idx_refunds_status ON refunds(status);
+    CREATE INDEX IF NOT EXISTS idx_refunds_location ON refunds(location_id);
+
+    CREATE TABLE IF NOT EXISTS refund_items (
+      id TEXT PRIMARY KEY,
+      refund_id TEXT NOT NULL,
+      sale_item_id TEXT,
+      product_id TEXT,
+      product_name TEXT,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      unit_price REAL DEFAULT 0,
+      amount REAL NOT NULL DEFAULT 0,
+      tax REAL DEFAULT 0,
+      reason TEXT,
+      FOREIGN KEY (refund_id) REFERENCES refunds(id)
+    );
+
+    -- ============================================================
     -- PIZZA SIZE ORDER TYPE PRICES
     -- ============================================================
 

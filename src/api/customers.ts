@@ -31,7 +31,25 @@ export function registerCustomerRoutes(app: FastifyInstance) {
     }
 
     const addresses = db.prepare("SELECT * FROM customer_addresses WHERE customer_id = ?").all(id);
-    return { ...(customer as Record<string, unknown>), addresses };
+
+    // Enrichment: visit count, total spent, store credits
+    const salesStats = db.prepare(`
+      SELECT COUNT(*) as visit_count, COALESCE(SUM(total), 0) as total_spent
+      FROM sales WHERE customer_id = ? AND status = 'COMPLETED'
+    `).get(id) as { visit_count: number; total_spent: number };
+
+    const storeCredits = db.prepare(`
+      SELECT id, code, initial_amount, current_balance, status, created_at
+      FROM store_credits WHERE customer_id = ? AND status = 'ACTIVE' AND current_balance > 0
+    `).all(id);
+
+    return {
+      ...(customer as Record<string, unknown>),
+      addresses,
+      visitCount: salesStats.visit_count,
+      totalSpent: salesStats.total_spent,
+      storeCredits,
+    };
   });
 
   app.post("/api/customers", async (req) => {

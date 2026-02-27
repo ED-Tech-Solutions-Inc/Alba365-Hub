@@ -38,6 +38,8 @@ export class PushSyncEngine {
     cash_drawer: "/api/hub/push/cash-drawer",
     shift_log: "/api/hub/push/shift",
     gift_card: "/api/hub/push/gift-card",
+    refund: "/api/hub/push/refund",
+    store_credit: "/api/hub/push/store-credit",
   };
 
   /**

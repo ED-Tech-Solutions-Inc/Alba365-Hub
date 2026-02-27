@@ -285,6 +285,181 @@ export function registerKitchenOrderRoutes(app: FastifyInstance) {
     return { success: true, previousStatus: order.status, newStatus: nextStatus };
   });
 
+  // Split kitchen order — creates child orders from selected items
+  app.post("/api/kitchen-orders/:id/split", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as Record<string, unknown>;
+    const db = getDb();
+
+    const order = db.prepare("SELECT * FROM kitchen_orders WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    if (!order) {
+      reply.status(404);
+      return { error: "Kitchen order not found" };
+    }
+
+    const splits = (body.splits as Array<Record<string, unknown>>) ?? [];
+    if (splits.length < 2) {
+      reply.status(400);
+      return { error: "At least 2 splits required" };
+    }
+
+    const splitGroupId = generateId();
+    const childIds: string[] = [];
+
+    transaction((txDb) => {
+      // Mark parent as split
+      txDb.prepare("UPDATE kitchen_orders SET split_group_id = ?, sync_status = 'PENDING', updated_at = datetime('now') WHERE id = ?")
+        .run(splitGroupId, id);
+
+      for (let i = 0; i < splits.length; i++) {
+        const split = splits[i];
+        const childId = generateId();
+        childIds.push(childId);
+        const items = (split.items as Array<Record<string, unknown>>) ?? [];
+
+        txDb.prepare(`
+          INSERT INTO kitchen_orders (
+            id, tenant_id, location_id, terminal_id, order_number,
+            order_type, status, customer_id, customer_name, server_id, server_name,
+            subtotal, discount_total, tax_total, total,
+            notes, items, metadata, parent_order_id, is_split_child, split_index, split_group_id,
+            created_at, sync_status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, datetime('now'), 'PENDING')
+        `).run(
+          childId, order.tenant_id, order.location_id, order.terminal_id,
+          `${order.order_number}-${i + 1}`,
+          order.order_type, "PENDING", order.customer_id, order.customer_name,
+          order.server_id, order.server_name,
+          split.subtotal ?? 0, split.discountTotal ?? 0, split.taxTotal ?? 0, split.total ?? 0,
+          order.notes, JSON.stringify(items), JSON.stringify(split.metadata ?? {}),
+          id, i + 1, splitGroupId,
+        );
+
+        // Insert items for child order
+        const insertItem = txDb.prepare(`
+          INSERT INTO kitchen_order_items (
+            id, kitchen_order_id, product_id, product_name, variant_id, variant_name,
+            quantity, unit_price, status, modifiers, notes, metadata
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+        `);
+
+        for (const item of items) {
+          insertItem.run(
+            generateId(), childId,
+            item.productId, item.productName,
+            item.variantId ?? null, item.variantName ?? null,
+            item.quantity ?? 1, item.unitPrice ?? 0,
+            JSON.stringify(item.modifiers ?? []),
+            item.notes ?? null, JSON.stringify(item.metadata ?? {}),
+          );
+        }
+      }
+
+      // Queue for sync
+      txDb.prepare(`
+        INSERT INTO outbox_queue (entity_type, entity_id, action, payload, priority, created_at)
+        VALUES ('kitchen_order', ?, 'split', ?, 10, datetime('now'))
+      `).run(id, JSON.stringify({ parentId: id, splitGroupId, childIds, splits }));
+    });
+
+    broadcast("order:updated", { id, action: "split", childIds });
+
+    return { success: true, parentId: id, splitGroupId, childIds };
+  });
+
+  // Transfer kitchen order to another staff member
+  app.post("/api/kitchen-orders/:id/transfer", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as Record<string, unknown>;
+    const db = getDb();
+
+    const order = db.prepare("SELECT id FROM kitchen_orders WHERE id = ?").get(id);
+    if (!order) {
+      reply.status(404);
+      return { error: "Kitchen order not found" };
+    }
+
+    const newServerId = body.serverId as string;
+    const newServerName = body.serverName as string;
+
+    transaction((txDb) => {
+      txDb.prepare(`
+        UPDATE kitchen_orders SET server_id = ?, server_name = ?, sync_status = 'PENDING', updated_at = datetime('now')
+        WHERE id = ?
+      `).run(newServerId, newServerName, id);
+
+      txDb.prepare(`
+        INSERT INTO outbox_queue (entity_type, entity_id, action, payload, priority, created_at)
+        VALUES ('kitchen_order', ?, 'transfer', ?, 5, datetime('now'))
+      `).run(id, JSON.stringify({ orderId: id, serverId: newServerId, serverName: newServerName }));
+    });
+
+    broadcast("order:updated", { id, action: "transfer", serverName: newServerName });
+
+    return { success: true };
+  });
+
+  // Get delivery orders (for driver dashboard)
+  app.get("/api/kitchen-orders/delivery", async (req) => {
+    const db = getDb();
+    const { driverId, status } = req.query as Record<string, string>;
+
+    let sql = `SELECT * FROM kitchen_orders WHERE location_id = ? AND order_type = 'DELIVERY'`;
+    const params: unknown[] = [config.locationId ?? ""];
+
+    if (driverId) {
+      sql += " AND json_extract(metadata, '$.driverId') = ?";
+      params.push(driverId);
+    }
+    if (status) {
+      sql += " AND status = ?";
+      params.push(status);
+    } else {
+      sql += " AND status IN ('PENDING', 'PREPARING', 'READY', 'COMPLETED')";
+    }
+
+    sql += " ORDER BY created_at DESC LIMIT 50";
+    return db.prepare(sql).all(...params);
+  });
+
+  // Update delivery status on a kitchen order
+  app.patch("/api/kitchen-orders/:id/delivery-status", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as Record<string, unknown>;
+    const db = getDb();
+
+    const order = db.prepare("SELECT id, metadata FROM kitchen_orders WHERE id = ?").get(id) as { id: string; metadata: string } | undefined;
+    if (!order) {
+      reply.status(404);
+      return { error: "Kitchen order not found" };
+    }
+
+    const deliveryStatus = body.deliveryStatus as string;
+    const existingMeta = JSON.parse(order.metadata || "{}");
+    const updatedMeta = {
+      ...existingMeta,
+      deliveryStatus,
+      driverId: body.driverId ?? existingMeta.driverId,
+      driverName: body.driverName ?? existingMeta.driverName,
+      pickedUpAt: deliveryStatus === "PICKED_UP" ? new Date().toISOString() : existingMeta.pickedUpAt,
+      deliveredAt: deliveryStatus === "DELIVERED" ? new Date().toISOString() : existingMeta.deliveredAt,
+    };
+
+    transaction((txDb) => {
+      txDb.prepare("UPDATE kitchen_orders SET metadata = ?, sync_status = 'PENDING', updated_at = datetime('now') WHERE id = ?")
+        .run(JSON.stringify(updatedMeta), id);
+
+      txDb.prepare(`
+        INSERT INTO outbox_queue (entity_type, entity_id, action, payload, priority, created_at)
+        VALUES ('kitchen_order', ?, 'update', ?, 5, datetime('now'))
+      `).run(id, JSON.stringify({ id, deliveryStatus, metadata: updatedMeta }));
+    });
+
+    broadcast("order:updated", { id, action: "delivery-status", deliveryStatus });
+
+    return { success: true, deliveryStatus };
+  });
+
   // Update item status
   app.post("/api/kitchen-orders/:orderId/items/:itemId/status", async (req, reply) => {
     const { orderId, itemId } = req.params as { orderId: string; itemId: string };
