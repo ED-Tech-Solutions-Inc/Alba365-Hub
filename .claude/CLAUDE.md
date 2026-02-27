@@ -6,11 +6,11 @@
 
 ## Three Repositories (CRITICAL — commit to the correct repo)
 
-| Repo | GitHub | What goes here |
-|------|--------|----------------|
-| **pos-system** | `edtechsolution/Retail-pos` | Web app, Hub v1 (Web/Electron), Electron, Prisma, all portals |
-| **Alba365-App** | `ED-Tech-Solutions-Inc/Alba365-App` | Flutter POS only (`apps/flutter_pos/`) |
-| **Alba365-Hub** | `ED-Tech-Solutions-Inc/Alba365-Hub` | **This repo** — Hub v2 only (Fastify 5 + SQLite, Flutter-facing, port 4001) |
+| Repo | Path | GitHub | What goes here |
+|------|------|--------|----------------|
+| **pos-system** | `C:\Users\AmarDhaliwal\source\repos\pos-system` | `edtechsolution/Retail-pos` | Web app, Hub v1 (Web/Electron), Electron, Prisma, all portals |
+| **Alba365-App** | `C:\Users\AmarDhaliwal\source\repos\pos-system\apps\flutter_pos` | `ED-Tech-Solutions-Inc/Alba365-App` | Flutter POS only (has its own `.git`, gitignored in pos-system) |
+| **Alba365-Hub** | `C:\Users\AmarDhaliwal\source\repos\pos-system\apps\hub_v2` | `ED-Tech-Solutions-Inc/Alba365-Hub` | **This repo** — Hub v2 only (Fastify 5 + SQLite, Flutter-facing, port 4001) |
 
 - Flutter POS connects to Hub v2 via HTTP — no source imports between repos
 - Hub v2 syncs with Cloud (Azure PostgreSQL) — never talks to Hub v1 directly
