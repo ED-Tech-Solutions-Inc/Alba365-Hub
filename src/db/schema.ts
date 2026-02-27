@@ -1436,6 +1436,12 @@ export function initializeSchema(db: Database.Database): void {
     "ALTER TABLE terminal_settings ADD COLUMN auto_logout_timeout INTEGER",
     "ALTER TABLE terminal_settings ADD COLUMN block_clock_out_with_open_orders INTEGER DEFAULT 0",
     "ALTER TABLE terminal_settings ADD COLUMN allow_shared_cash_drawer INTEGER DEFAULT 0",
+    // tables: add status, current_session_id, sort_order columns
+    "ALTER TABLE tables ADD COLUMN status TEXT DEFAULT 'AVAILABLE'",
+    "ALTER TABLE tables ADD COLUMN current_session_id TEXT",
+    "ALTER TABLE tables ADD COLUMN sort_order INTEGER DEFAULT 0",
+    "ALTER TABLE tables ADD COLUMN display_name TEXT",
+    "ALTER TABLE tables ADD COLUMN table_number TEXT",
     // reservations table (local-only, not synced from cloud)
     `CREATE TABLE IF NOT EXISTS reservations (
       id TEXT PRIMARY KEY,
