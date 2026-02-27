@@ -104,9 +104,18 @@ export function registerTableRoutes(app: FastifyInstance) {
 
     transaction((db) => {
       db.prepare(`
-        INSERT INTO table_sessions (id, table_id, server_id, server_name, guest_count, status, started_at)
-        VALUES (?, ?, ?, ?, ?, 'ACTIVE', datetime('now'))
-      `).run(id, body.tableId, body.serverId ?? null, body.serverName ?? null, body.guestCount ?? 1);
+        INSERT INTO table_sessions (id, tenant_id, location_id, table_id, server_id, server_name, guest_count, status, notes, opened_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, datetime('now'))
+      `).run(
+        id,
+        config.tenantId ?? "",
+        config.locationId ?? "",
+        body.tableId,
+        body.serverId ?? null,
+        body.serverName ?? null,
+        body.guestCount ?? 1,
+        body.notes ?? null,
+      );
 
       // Update table status
       db.prepare("UPDATE tables SET status = 'OCCUPIED', current_session_id = ? WHERE id = ?")
@@ -149,7 +158,7 @@ export function registerTableRoutes(app: FastifyInstance) {
     }
 
     transaction((txDb) => {
-      txDb.prepare("UPDATE table_sessions SET status = 'CLOSED', ended_at = datetime('now') WHERE id = ?").run(id);
+      txDb.prepare("UPDATE table_sessions SET status = 'CLOSED', closed_at = datetime('now') WHERE id = ?").run(id);
       txDb.prepare("UPDATE tables SET status = 'AVAILABLE', current_session_id = NULL WHERE id = ?").run(session.table_id);
 
       // Queue for cloud sync
