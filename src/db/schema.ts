@@ -796,6 +796,23 @@ export function initializeSchema(db: Database.Database): void {
       auto_fire INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS reservations (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      location_id TEXT NOT NULL,
+      customer_name TEXT NOT NULL,
+      phone TEXT,
+      party_size INTEGER DEFAULT 2,
+      reservation_date TEXT NOT NULL,
+      reservation_time TEXT NOT NULL,
+      status TEXT DEFAULT 'CONFIRMED',
+      notes TEXT,
+      table_id TEXT,
+      created_at INTEGER NOT NULL,
+      seated_at INTEGER,
+      cancelled_at INTEGER
+    );
+
     CREATE TABLE IF NOT EXISTS waiting_queue (
       id TEXT PRIMARY KEY,
       tenant_id TEXT NOT NULL,
@@ -1419,6 +1436,23 @@ export function initializeSchema(db: Database.Database): void {
     "ALTER TABLE terminal_settings ADD COLUMN auto_logout_timeout INTEGER",
     "ALTER TABLE terminal_settings ADD COLUMN block_clock_out_with_open_orders INTEGER DEFAULT 0",
     "ALTER TABLE terminal_settings ADD COLUMN allow_shared_cash_drawer INTEGER DEFAULT 0",
+    // reservations table (local-only, not synced from cloud)
+    `CREATE TABLE IF NOT EXISTS reservations (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      location_id TEXT NOT NULL,
+      customer_name TEXT NOT NULL,
+      phone TEXT,
+      party_size INTEGER DEFAULT 2,
+      reservation_date TEXT NOT NULL,
+      reservation_time TEXT NOT NULL,
+      status TEXT DEFAULT 'CONFIRMED',
+      notes TEXT,
+      table_id TEXT,
+      created_at INTEGER NOT NULL,
+      seated_at INTEGER,
+      cancelled_at INTEGER
+    )`,
     // waiting_queue table (local-only, not synced from cloud)
     `CREATE TABLE IF NOT EXISTS waiting_queue (
       id TEXT PRIMARY KEY,

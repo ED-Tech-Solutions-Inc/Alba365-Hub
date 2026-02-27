@@ -36,6 +36,7 @@ import { registerCallerIdRoutes } from "./api/caller-id.js";
 import { registerStoreCreditRoutes } from "./api/store-credits.js";
 import { registerRefundRoutes } from "./api/refunds.js";
 import { registerWaitingQueueRoutes } from "./api/waiting-queue.js";
+import { registerReservationRoutes } from "./api/reservations.js";
 import { registerWebSocketHandler } from "./realtime/websocket.js";
 import { registerAuthMiddleware } from "./middleware/auth.js";
 import { startCallerIdListener, stopCallerIdListener } from "./caller-id/udp-listener.js";
@@ -99,6 +100,7 @@ export async function createServer() {
   registerStoreCreditRoutes(app);
   registerRefundRoutes(app);
   registerWaitingQueueRoutes(app);
+  registerReservationRoutes(app);
   registerSyncRoutes(app);
   registerSetupRoutes(app);
 
