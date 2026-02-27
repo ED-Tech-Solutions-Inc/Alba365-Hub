@@ -32,8 +32,10 @@ import { registerAuditLogRoutes } from "./api/audit-logs.js";
 import { registerSequenceRoutes } from "./api/sequence.js";
 import { registerGuestCheckRoutes } from "./api/guest-checks.js";
 import { registerUserRoutes } from "./api/users.js";
+import { registerCallerIdRoutes } from "./api/caller-id.js";
 import { registerWebSocketHandler } from "./realtime/websocket.js";
 import { registerAuthMiddleware } from "./middleware/auth.js";
+import { startCallerIdListener, stopCallerIdListener } from "./caller-id/udp-listener.js";
 
 export async function createServer() {
   // Initialize database first
@@ -90,6 +92,7 @@ export async function createServer() {
   registerSequenceRoutes(app);
   registerGuestCheckRoutes(app);
   registerUserRoutes(app);
+  registerCallerIdRoutes(app);
   registerSyncRoutes(app);
   registerSetupRoutes(app);
 
@@ -99,9 +102,13 @@ export async function createServer() {
   // Start sync engines
   startSyncEngines();
 
+  // Start caller ID UDP listener (if configured)
+  startCallerIdListener();
+
   // Graceful shutdown
   const shutdown = async () => {
     console.log("[Server] Shutting down gracefully...");
+    stopCallerIdListener();
     stopSyncEngines();
     closeDatabase();
     await app.close();

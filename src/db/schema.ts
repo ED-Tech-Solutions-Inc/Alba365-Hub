@@ -12,6 +12,75 @@ export function initializeSchema(db: Database.Database): void {
 
   db.exec(`
     -- ============================================================
+    -- CALLER ID TABLES
+    -- ============================================================
+
+    CREATE TABLE IF NOT EXISTS caller_id_config (
+      id TEXT PRIMARY KEY,
+      location_id TEXT NOT NULL,
+      tenant_id TEXT,
+      enabled INTEGER DEFAULT 0,
+      hardware_type TEXT DEFAULT 'BASIC_ETHERNET',
+      line_count INTEGER DEFAULT 2,
+      connection_mode TEXT DEFAULT 'UDP',
+      udp_port INTEGER DEFAULT 3520,
+      udp_listener_host TEXT,
+      cloud_relay_url TEXT,
+      cloud_relay_token TEXT,
+      push_method TEXT DEFAULT 'WEBSOCKET',
+      polling_interval INTEGER DEFAULT 3,
+      auto_lookup_customer INTEGER DEFAULT 1,
+      log_all_calls INTEGER DEFAULT 0,
+      show_caller_animation INTEGER DEFAULT 1,
+      popup_on_incoming INTEGER DEFAULT 1,
+      play_ring_sound INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_caller_id_config_location ON caller_id_config(location_id);
+
+    CREATE TABLE IF NOT EXISTS caller_id_lines (
+      id TEXT PRIMARY KEY,
+      config_id TEXT NOT NULL REFERENCES caller_id_config(id) ON DELETE CASCADE,
+      line_number INTEGER NOT NULL,
+      label TEXT,
+      enabled INTEGER DEFAULT 1,
+      default_order_type TEXT,
+      ring_sound TEXT DEFAULT 'default',
+      priority INTEGER DEFAULT 1,
+      color TEXT DEFAULT '#3B82F6',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(config_id, line_number)
+    );
+
+    CREATE TABLE IF NOT EXISTS call_log (
+      id TEXT PRIMARY KEY,
+      location_id TEXT NOT NULL,
+      line_number INTEGER NOT NULL,
+      direction TEXT NOT NULL DEFAULT 'INBOUND',
+      phone_number TEXT,
+      caller_name TEXT,
+      call_started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      call_ended_at TEXT,
+      duration_seconds INTEGER,
+      ring_count INTEGER DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'RINGING',
+      customer_id TEXT,
+      order_id TEXT,
+      order_type TEXT,
+      handled_by_id TEXT,
+      raw_data TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_call_log_location_status ON call_log(location_id, status);
+    CREATE INDEX IF NOT EXISTS idx_call_log_phone ON call_log(phone_number);
+    CREATE INDEX IF NOT EXISTS idx_call_log_location_created ON call_log(location_id, created_at);
+
+    -- ============================================================
     -- SYSTEM TABLES
     -- ============================================================
 

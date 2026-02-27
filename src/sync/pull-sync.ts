@@ -199,6 +199,8 @@ export class PullSyncEngine {
         { name: "deal_size_order_type_prices", pull: () => this.pullDealSizeOrderTypePrices() },
         { name: "location_business_hours", pull: () => this.pullLocationBusinessHours() },
         { name: "web_order_settings", pull: () => this.pullWebOrderSettings() },
+        { name: "caller_id_config", pull: () => this.pullCallerIdConfig() },
+        { name: "caller_id_lines", pull: () => this.pullCallerIdLines() },
         { name: "cash_drawers", pull: () => this.pullCashDrawers() },
         { name: "cash_drawer_transactions", pull: () => this.pullCashDrawerTransactions() },
         { name: "staff_banks", pull: () => this.pullStaffBanks() },
@@ -1561,5 +1563,43 @@ export class PullSyncEngine {
     ]);
     this.updateSyncState("sale_items", count);
     return { entity: "sale_items", pulled: count, errors: [] };
+  }
+
+  // --- Caller ID Config (synced from cloud) ---
+  private async pullCallerIdConfig(): Promise<PullResult> {
+    const state = this.getSyncState("caller_id_config");
+    const params: Record<string, string> = {};
+    if (state.last_synced_at) params.sinceVersion = state.last_synced_at;
+
+    const rows = await this.fetchAndTransform("/api/hub/sync/caller-id-config", params);
+
+    const count = this.upsertRows("caller_id_config", rows, [
+      "id", "location_id", "tenant_id", "enabled",
+      "hardware_type", "line_count", "connection_mode",
+      "udp_port", "udp_listener_host", "cloud_relay_url", "cloud_relay_token",
+      "push_method", "polling_interval",
+      "auto_lookup_customer", "log_all_calls",
+      "show_caller_animation", "popup_on_incoming", "play_ring_sound",
+      "created_at", "updated_at",
+    ]);
+    this.updateSyncState("caller_id_config", count);
+    return { entity: "caller_id_config", pulled: count, errors: [] };
+  }
+
+  // --- Caller ID Lines (synced from cloud) ---
+  private async pullCallerIdLines(): Promise<PullResult> {
+    const state = this.getSyncState("caller_id_lines");
+    const params: Record<string, string> = {};
+    if (state.last_synced_at) params.sinceVersion = state.last_synced_at;
+
+    const rows = await this.fetchAndTransform("/api/hub/sync/caller-id-lines", params);
+
+    const count = this.upsertRows("caller_id_lines", rows, [
+      "id", "config_id", "line_number", "label", "enabled",
+      "default_order_type", "ring_sound", "priority", "color",
+      "created_at", "updated_at",
+    ]);
+    this.updateSyncState("caller_id_lines", count);
+    return { entity: "caller_id_lines", pulled: count, errors: [] };
   }
 }
