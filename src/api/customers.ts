@@ -118,7 +118,7 @@ export function registerCustomerRoutes(app: FastifyInstance) {
     // Recent completed sales
     const recentSales = db.prepare(`
       SELECT id, receipt_number, created_at, order_type, subtotal, total, status,
-             cashier_name, customer_name, delivery_address
+             cashier_name, customer_name, delivery_charge
       FROM sales
       WHERE customer_id = ? AND status = 'COMPLETED'
       ORDER BY created_at DESC LIMIT 10
