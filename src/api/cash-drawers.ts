@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getDb, generateId, transaction } from "../db/index.js";
+import { config } from "../config.js";
 
 export function registerCashDrawerRoutes(app: FastifyInstance) {
   // Get active cash drawer for this terminal
@@ -14,11 +15,29 @@ export function registerCashDrawerRoutes(app: FastifyInstance) {
 
     if (!drawer) return null;
 
+    const drawerId = (drawer as Record<string, unknown>).id as string;
     const transactions = db.prepare(
       "SELECT * FROM cash_drawer_transactions WHERE cash_drawer_id = ? ORDER BY created_at DESC"
-    ).all((drawer as Record<string, unknown>).id as string);
+    ).all(drawerId);
 
-    return { ...(drawer as Record<string, unknown>), transactions };
+    // Compute aggregates for Flutter client (matches web POS field names)
+    let payIns = 0;
+    let payOuts = 0;
+    for (const txn of transactions as Array<Record<string, unknown>>) {
+      const amount = (txn.amount as number) || 0;
+      if (txn.type === "PAY_IN") payIns += amount;
+      else if (txn.type === "PAY_OUT") payOuts += amount;
+    }
+
+    // Also alias opening_balance as opening_amount for client compatibility
+    const d = drawer as Record<string, unknown>;
+    return {
+      ...d,
+      opening_amount: d.opening_balance,
+      pay_ins: payIns,
+      pay_outs: payOuts,
+      transactions,
+    };
   });
 
   // Open cash drawer
@@ -28,17 +47,17 @@ export function registerCashDrawerRoutes(app: FastifyInstance) {
     return transaction((db) => {
       const id = generateId();
       db.prepare(`
-        INSERT INTO cash_drawers (id, terminal_id, opened_by_id, opened_by_name, opening_amount, status, opened_at)
+        INSERT INTO cash_drawers (id, tenant_id, terminal_id, user_id, opening_balance, status, opened_at)
         VALUES (?, ?, ?, ?, ?, 'OPEN', datetime('now'))
-      `).run(id, body.terminalId, body.userId, body.userName, body.openingAmount ?? 0);
+      `).run(id, config.tenantId ?? "", body.terminalId, body.userId, body.openingAmount ?? 0);
 
       // Queue for sync
       db.prepare(`
         INSERT INTO outbox_queue (entity_type, entity_id, action, payload, priority, created_at)
         VALUES ('cash_drawer', ?, 'create', ?, 5, datetime('now'))
-      `).run(id, JSON.stringify({ ...body, id }));
+      `).run(id, JSON.stringify({ ...body, id, tenantId: config.tenantId }));
 
-      return { id, status: "OPEN" };
+      return { id, status: "OPEN", user_id: body.userId, opened_by_name: body.userName };
     });
   });
 
@@ -56,10 +75,10 @@ export function registerCashDrawerRoutes(app: FastifyInstance) {
 
     transaction((txDb) => {
       txDb.prepare(`
-        UPDATE cash_drawers SET status = 'CLOSED', closed_by_id = ?, closed_by_name = ?,
-          closing_amount = ?, expected_amount = ?, difference = ?, closed_at = datetime('now'), sync_status = 'PENDING'
+        UPDATE cash_drawers SET status = 'CLOSED', closed_by_id = ?,
+          closing_balance = ?, expected_balance = ?, difference = ?, closed_at = datetime('now'), sync_status = 'PENDING'
         WHERE id = ?
-      `).run(body.userId, body.userName, body.closingAmount, body.expectedAmount, body.difference, id);
+      `).run(body.userId, body.closingAmount, body.expectedAmount, body.difference, id);
 
       // Queue for sync
       txDb.prepare(`

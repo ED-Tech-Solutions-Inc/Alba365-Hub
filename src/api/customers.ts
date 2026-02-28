@@ -79,6 +79,176 @@ export function registerCustomerRoutes(app: FastifyInstance) {
     return { id, ...body };
   });
 
+  // Phone lookup with order history + addresses
+  app.get("/api/customers/by-phone/:phone", async (req) => {
+    const { phone } = req.params as { phone: string };
+    const db = getDb();
+    const cleanPhone = phone.replace(/\D/g, "").slice(-10);
+
+    if (cleanPhone.length < 7) {
+      return { found: false };
+    }
+
+    const customer = db.prepare(`
+      SELECT * FROM customers WHERE tenant_id = ? AND phone LIKE ?
+    `).get(config.tenantId ?? "", `%${cleanPhone}`) as Record<string, unknown> | undefined;
+
+    if (!customer) {
+      return { found: false };
+    }
+
+    const customerId = customer.id as string;
+
+    const addresses = db.prepare(`
+      SELECT * FROM customer_addresses
+      WHERE customer_id = ? AND is_active = 1
+      ORDER BY is_default DESC, id
+    `).all(customerId);
+
+    const creditRow = db.prepare(`
+      SELECT COALESCE(SUM(current_balance), 0) as balance
+      FROM store_credits WHERE customer_id = ? AND status = 'ACTIVE' AND current_balance > 0
+    `).get(customerId) as { balance: number };
+
+    const salesStats = db.prepare(`
+      SELECT COUNT(*) as visit_count, COALESCE(SUM(total), 0) as total_spent
+      FROM sales WHERE customer_id = ? AND status = 'COMPLETED'
+    `).get(customerId) as { visit_count: number; total_spent: number };
+
+    // Recent completed sales
+    const recentSales = db.prepare(`
+      SELECT id, receipt_number, created_at, order_type, subtotal, total, status,
+             cashier_name, customer_name, delivery_address
+      FROM sales
+      WHERE customer_id = ? AND status = 'COMPLETED'
+      ORDER BY created_at DESC LIMIT 10
+    `).all(customerId) as Array<Record<string, unknown>>;
+
+    const orderHistory = recentSales.map((s) => ({
+      ...s,
+      source: "sale",
+    }));
+
+    return {
+      found: true,
+      customer: {
+        ...customer,
+        addresses,
+        storeCreditBalance: creditRow.balance,
+        visitCount: salesStats.visit_count,
+        totalSpent: salesStats.total_spent,
+        orderHistory,
+      },
+    };
+  });
+
+  // Upsert customer by phone (find or create)
+  app.post("/api/customers/upsert-by-phone", async (req) => {
+    const body = req.body as Record<string, unknown>;
+    const phone = (body.phone as string || "").replace(/\D/g, "");
+    const db = getDb();
+
+    const existing = db.prepare(
+      "SELECT * FROM customers WHERE tenant_id = ? AND phone = ?"
+    ).get(config.tenantId ?? "", phone) as Record<string, unknown> | undefined;
+
+    if (existing) {
+      // Update non-null fields
+      transaction((txDb) => {
+        txDb.prepare(`
+          UPDATE customers SET
+            first_name = COALESCE(?, first_name),
+            last_name = COALESCE(?, last_name),
+            email = COALESCE(?, email),
+            notes = COALESCE(?, notes),
+            updated_at = datetime('now')
+          WHERE id = ? AND tenant_id = ?
+        `).run(
+          body.firstName ?? null, body.lastName ?? null,
+          body.email ?? null, body.notes ?? null,
+          existing.id, config.tenantId ?? "",
+        );
+
+        txDb.prepare(`
+          INSERT INTO outbox_queue (entity_type, entity_id, action, payload, priority, created_at)
+          VALUES ('customer', ?, 'update', ?, 5, datetime('now'))
+        `).run(existing.id, JSON.stringify({ id: existing.id, ...body }));
+      });
+
+      const updated = db.prepare("SELECT * FROM customers WHERE id = ?").get(existing.id);
+      return { ...(updated as Record<string, unknown>), isNew: false };
+    }
+
+    // Create new customer
+    const id = generateId();
+    transaction((txDb) => {
+      txDb.prepare(`
+        INSERT INTO customers (id, tenant_id, first_name, last_name, email, phone, notes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `).run(
+        id, config.tenantId ?? "",
+        body.firstName ?? null, body.lastName ?? null,
+        body.email ?? null, phone,
+        body.notes ?? null,
+      );
+
+      txDb.prepare(`
+        INSERT INTO outbox_queue (entity_type, entity_id, action, payload, priority, created_at)
+        VALUES ('customer', ?, 'create', ?, 5, datetime('now'))
+      `).run(id, JSON.stringify({ id, ...body, phone }));
+    });
+
+    const created = db.prepare("SELECT * FROM customers WHERE id = ?").get(id);
+    return { ...(created as Record<string, unknown>), isNew: true };
+  });
+
+  // Add customer address
+  app.post("/api/customers/:id/addresses", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as Record<string, unknown>;
+    const db = getDb();
+
+    const customer = db.prepare("SELECT id FROM customers WHERE id = ? AND tenant_id = ?")
+      .get(id, config.tenantId ?? "");
+    if (!customer) {
+      reply.status(404);
+      return { error: "Customer not found" };
+    }
+
+    const addressId = generateId();
+
+    transaction((txDb) => {
+      if (body.isDefault) {
+        txDb.prepare("UPDATE customer_addresses SET is_default = 0 WHERE customer_id = ?").run(id);
+      }
+
+      txDb.prepare(`
+        INSERT INTO customer_addresses (id, customer_id, tenant_id, label, address, address_notes, buzzer_number, city, province, postal_code, delivery_charge, driver_compensation, is_default, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `).run(
+        addressId, id, config.tenantId ?? "",
+        body.label ?? null,
+        body.address ?? null,
+        body.addressNotes ?? null,
+        body.buzzerNumber ?? null,
+        body.city ?? null,
+        body.province ?? null,
+        body.postalCode ?? null,
+        body.deliveryCharge ?? 0,
+        body.driverCompensation ?? 0,
+        body.isDefault ? 1 : 0,
+      );
+
+      txDb.prepare(`
+        INSERT INTO outbox_queue (entity_type, entity_id, action, payload, priority, created_at)
+        VALUES ('customer_address', ?, 'create', ?, 5, datetime('now'))
+      `).run(addressId, JSON.stringify({ id: addressId, customerId: id, ...body }));
+    });
+
+    const address = db.prepare("SELECT * FROM customer_addresses WHERE id = ?").get(addressId);
+    return address;
+  });
+
   // Update customer
   app.put("/api/customers/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
