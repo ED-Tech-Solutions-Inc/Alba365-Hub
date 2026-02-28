@@ -442,6 +442,7 @@ export function initializeSchema(db: Database.Database): void {
       name TEXT NOT NULL,
       code TEXT,
       sort_order INTEGER DEFAULT 0,
+      is_default INTEGER DEFAULT 0,
       is_active INTEGER DEFAULT 1
     );
 
@@ -451,6 +452,7 @@ export function initializeSchema(db: Database.Database): void {
       config_id TEXT NOT NULL,
       name TEXT NOT NULL,
       sort_order INTEGER DEFAULT 0,
+      is_default INTEGER DEFAULT 0,
       is_active INTEGER DEFAULT 1
     );
 
@@ -460,6 +462,7 @@ export function initializeSchema(db: Database.Database): void {
       config_id TEXT NOT NULL,
       name TEXT NOT NULL,
       sort_order INTEGER DEFAULT 0,
+      is_default INTEGER DEFAULT 0,
       is_active INTEGER DEFAULT 1
     );
 
@@ -469,6 +472,7 @@ export function initializeSchema(db: Database.Database): void {
       config_id TEXT NOT NULL,
       name TEXT NOT NULL,
       sort_order INTEGER DEFAULT 0,
+      is_default INTEGER DEFAULT 0,
       is_active INTEGER DEFAULT 1
     );
 
@@ -479,6 +483,8 @@ export function initializeSchema(db: Database.Database): void {
       name TEXT NOT NULL,
       category_id TEXT,
       sort_order INTEGER DEFAULT 0,
+      is_default INTEGER DEFAULT 0,
+      is_premium INTEGER DEFAULT 0,
       is_active INTEGER DEFAULT 1
     );
 
@@ -487,7 +493,25 @@ export function initializeSchema(db: Database.Database): void {
       tenant_id TEXT NOT NULL,
       config_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      sort_order INTEGER DEFAULT 0
+      sort_order INTEGER DEFAULT 0,
+      is_premium INTEGER DEFAULT 0,
+      is_active INTEGER DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS pizza_product_configs (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      default_size_id TEXT,
+      default_crust_id TEXT,
+      default_sauces TEXT DEFAULT '[]',
+      default_cheeses TEXT DEFAULT '[]',
+      default_toppings TEXT DEFAULT '[]',
+      free_toppings_count INTEGER DEFAULT 0,
+      max_toppings INTEGER,
+      allow_half_and_half INTEGER DEFAULT 1,
+      half_and_half_upcharge REAL DEFAULT 0,
+      is_active INTEGER DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS pizza_size_prices (
@@ -551,7 +575,11 @@ export function initializeSchema(db: Database.Database): void {
       config_id TEXT,
       name TEXT NOT NULL,
       code TEXT,
+      description TEXT,
       deal_type TEXT NOT NULL,
+      base_price REAL,
+      pricing_mode TEXT DEFAULT 'FIXED',
+      topping_charge_target TEXT DEFAULT 'ALL',
       is_active INTEGER DEFAULT 1,
       min_order_amount REAL DEFAULT 0,
       max_uses_total INTEGER,
@@ -561,6 +589,12 @@ export function initializeSchema(db: Database.Database): void {
       order_types TEXT DEFAULT '[]',
       location_ids TEXT DEFAULT '[]',
       free_toppings INTEGER DEFAULT 0,
+      free_premium_toppings INTEGER DEFAULT 0,
+      topping_type TEXT,
+      free_toppings_scope TEXT DEFAULT 'PER_ITEM',
+      free_crust INTEGER DEFAULT 0,
+      category_id TEXT,
+      config TEXT DEFAULT '{}',
       can_stack INTEGER DEFAULT 0,
       allow_discount INTEGER DEFAULT 1,
       allow_coupon INTEGER DEFAULT 1,
@@ -575,15 +609,23 @@ export function initializeSchema(db: Database.Database): void {
       tenant_id TEXT NOT NULL,
       deal_id TEXT NOT NULL,
       product_id TEXT,
+      product_ids TEXT DEFAULT '[]',
       category_id TEXT,
+      variant_id TEXT,
+      product_type TEXT,
+      name TEXT,
       role TEXT NOT NULL DEFAULT 'QUALIFIER',
       quantity INTEGER DEFAULT 1,
+      quantity_per_item INTEGER DEFAULT 1,
       min_quantity INTEGER DEFAULT 1,
+      max_quantity INTEGER,
       discount_type TEXT,
       discount_value REAL DEFAULT 0,
       sort_order INTEGER DEFAULT 0,
       allow_pizza INTEGER DEFAULT 0,
       allow_variant_selection INTEGER DEFAULT 0,
+      can_swap INTEGER DEFAULT 0,
+      swap_product_ids TEXT DEFAULT '[]',
       FOREIGN KEY (deal_id) REFERENCES deals(id)
     );
 
@@ -1476,6 +1518,42 @@ export function initializeSchema(db: Database.Database): void {
       seated_at INTEGER,
       cancelled_at INTEGER
     )`,
+
+    // Pizza entity defaults + premium
+    "ALTER TABLE pizza_sizes ADD COLUMN is_default INTEGER DEFAULT 0",
+    "ALTER TABLE pizza_crusts ADD COLUMN is_default INTEGER DEFAULT 0",
+    "ALTER TABLE pizza_sauces ADD COLUMN is_default INTEGER DEFAULT 0",
+    "ALTER TABLE pizza_cheeses ADD COLUMN is_default INTEGER DEFAULT 0",
+    "ALTER TABLE pizza_toppings ADD COLUMN is_default INTEGER DEFAULT 0",
+    "ALTER TABLE pizza_toppings ADD COLUMN is_premium INTEGER DEFAULT 0",
+    "ALTER TABLE pizza_topping_categories ADD COLUMN is_premium INTEGER DEFAULT 0",
+    "ALTER TABLE pizza_topping_categories ADD COLUMN is_active INTEGER DEFAULT 1",
+
+    // Legacy pricing fields (web POS uses size.toppingPrice * topping.priceMultiplier * amountMultiplier)
+    "ALTER TABLE pizza_sizes ADD COLUMN topping_price REAL DEFAULT 0",
+    "ALTER TABLE pizza_sizes ADD COLUMN half_topping_price REAL",
+    "ALTER TABLE pizza_toppings ADD COLUMN price_multiplier REAL DEFAULT 1.0",
+
+    // deals: add missing columns for deal builder parity
+    "ALTER TABLE deals ADD COLUMN description TEXT",
+    "ALTER TABLE deals ADD COLUMN base_price REAL",
+    "ALTER TABLE deals ADD COLUMN pricing_mode TEXT DEFAULT 'FIXED'",
+    "ALTER TABLE deals ADD COLUMN topping_charge_target TEXT DEFAULT 'ALL'",
+    "ALTER TABLE deals ADD COLUMN free_premium_toppings INTEGER DEFAULT 0",
+    "ALTER TABLE deals ADD COLUMN topping_type TEXT",
+    "ALTER TABLE deals ADD COLUMN free_toppings_scope TEXT DEFAULT 'PER_ITEM'",
+    "ALTER TABLE deals ADD COLUMN free_crust INTEGER DEFAULT 0",
+    "ALTER TABLE deals ADD COLUMN category_id TEXT",
+    "ALTER TABLE deals ADD COLUMN config TEXT DEFAULT '{}'",
+    // deal_items: add missing columns for deal builder parity
+    "ALTER TABLE deal_items ADD COLUMN product_ids TEXT DEFAULT '[]'",
+    "ALTER TABLE deal_items ADD COLUMN variant_id TEXT",
+    "ALTER TABLE deal_items ADD COLUMN product_type TEXT",
+    "ALTER TABLE deal_items ADD COLUMN name TEXT",
+    "ALTER TABLE deal_items ADD COLUMN quantity_per_item INTEGER DEFAULT 1",
+    "ALTER TABLE deal_items ADD COLUMN max_quantity INTEGER",
+    "ALTER TABLE deal_items ADD COLUMN can_swap INTEGER DEFAULT 0",
+    "ALTER TABLE deal_items ADD COLUMN swap_product_ids TEXT DEFAULT '[]'",
   ];
 
   for (const sql of migrations) {

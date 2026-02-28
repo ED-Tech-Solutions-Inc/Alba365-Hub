@@ -294,6 +294,38 @@ export class PullSyncEngine {
   }
 
   /**
+   * Full replace for tables that always pull ALL records (no cursor).
+   * Deletes all existing rows then inserts fresh data in a single transaction.
+   * Used for pizza price tables where cloud returns duplicate IDs across syncs.
+   */
+  private replaceTable(tableName: string, rows: Array<Record<string, unknown>>, columns: string[]) {
+    if (rows.length === 0) return;
+
+    const db = getDb();
+    const placeholders = columns.map(() => "?").join(", ");
+    const colNames = columns.map(c => `"${c}"`).join(", ");
+    const insertStmt = db.prepare(`INSERT INTO "${tableName}" (${colNames}) VALUES (${placeholders})`);
+
+    db.transaction(() => {
+      db.prepare(`DELETE FROM "${tableName}"`).run();
+      for (const item of rows) {
+        const values = columns.map((col) => {
+          const val = item[col];
+          if (val === undefined || val === null) return null;
+          if (typeof val === "object") return JSON.stringify(val);
+          return val;
+        });
+        try {
+          insertStmt.run(...values);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown";
+          console.error(`[PullSync] ${tableName} insert error: ${msg}`);
+        }
+      }
+    })();
+  }
+
+  /**
    * Fetch paginated items from a cloud endpoint.
    * Extracts items, converts camelCase → snake_case, applies field mappings.
    */
@@ -391,6 +423,37 @@ export class PullSyncEngine {
     if (otpRows.length > 0) {
       this.upsertRows("product_order_type_prices", otpRows, [
         "id", "tenant_id", "product_id", "order_type", "price",
+      ]);
+    }
+
+    // Also extract and upsert pizza_product_configs from embedded data
+    const pizzaConfigRows: Array<Record<string, unknown>> = [];
+    for (const item of rawItems) {
+      const ppc = item.pizzaProductConfig as Record<string, unknown> | null | undefined;
+      if (ppc && typeof ppc === "object" && ppc.id) {
+        pizzaConfigRows.push({
+          id: ppc.id,
+          tenant_id: item.tenantId,
+          product_id: item.id,
+          default_size_id: ppc.defaultSizeId ?? null,
+          default_crust_id: ppc.defaultCrustId ?? null,
+          default_sauces: ppc.defaultSauces ? JSON.stringify(ppc.defaultSauces) : "[]",
+          default_cheeses: ppc.defaultCheeses ? JSON.stringify(ppc.defaultCheeses) : "[]",
+          default_toppings: ppc.defaultToppings ? JSON.stringify(ppc.defaultToppings) : "[]",
+          free_toppings_count: ppc.freeToppingsCount ?? 0,
+          max_toppings: ppc.maxToppings ?? null,
+          allow_half_and_half: ppc.allowHalfHalf != null ? (ppc.allowHalfHalf ? 1 : 0) : 1,
+          half_and_half_upcharge: ppc.halfAndHalfUpcharge ?? 0,
+          is_active: ppc.isActive != null ? (ppc.isActive ? 1 : 0) : 1,
+        });
+      }
+    }
+    if (pizzaConfigRows.length > 0) {
+      this.upsertRows("pizza_product_configs", pizzaConfigRows, [
+        "id", "tenant_id", "product_id", "default_size_id", "default_crust_id",
+        "default_sauces", "default_cheeses", "default_toppings",
+        "free_toppings_count", "max_toppings", "allow_half_and_half",
+        "half_and_half_upcharge", "is_active",
       ]);
     }
 
@@ -612,7 +675,11 @@ export class PullSyncEngine {
       config_id: item.configId ?? null,
       name: item.name,
       code: item.code ?? null,
+      description: item.description ?? null,
       deal_type: item.dealType ?? (item.config as string) ?? "FIXED_PRICE",
+      base_price: item.basePrice != null ? Number(item.basePrice) : null,
+      pricing_mode: item.pricingMode ?? "FIXED",
+      topping_charge_target: item.toppingChargeTarget ?? "ALL",
       is_active: item.isActive ? 1 : 0,
       min_order_amount: item.minOrderAmount ?? 0,
       max_uses_total: item.maxUsesTotal ?? null,
@@ -622,6 +689,12 @@ export class PullSyncEngine {
       order_types: item.orderTypes ? JSON.stringify(item.orderTypes) : "[]",
       location_ids: item.locationIds ? JSON.stringify(item.locationIds) : "[]",
       free_toppings: item.freeToppings ?? 0,
+      free_premium_toppings: item.freePremiumToppings ?? 0,
+      topping_type: item.toppingType ?? null,
+      free_toppings_scope: item.freeToppingsScope ?? "PER_ITEM",
+      free_crust: item.freeCrust ? 1 : 0,
+      category_id: item.categoryId ?? null,
+      config: item.config ? JSON.stringify(item.config) : "{}",
       can_stack: item.canStack ? 1 : 0,
       allow_discount: item.allowDiscount != null ? (item.allowDiscount ? 1 : 0) : 1,
       allow_coupon: item.allowCoupon != null ? (item.allowCoupon ? 1 : 0) : 1,
@@ -632,9 +705,12 @@ export class PullSyncEngine {
     }));
 
     const count = this.upsertRows("deals", rows, [
-      "id", "tenant_id", "config_id", "name", "code", "deal_type", "is_active",
-      "min_order_amount", "max_uses_total", "max_uses_per_customer", "max_uses_per_order",
-      "current_uses", "order_types", "location_ids", "free_toppings",
+      "id", "tenant_id", "config_id", "name", "code", "description", "deal_type",
+      "base_price", "pricing_mode", "topping_charge_target",
+      "is_active", "min_order_amount", "max_uses_total", "max_uses_per_customer",
+      "max_uses_per_order", "current_uses", "order_types", "location_ids",
+      "free_toppings", "free_premium_toppings", "topping_type", "free_toppings_scope",
+      "free_crust", "category_id", "config",
       "can_stack", "allow_discount", "allow_coupon", "starts_at", "expires_at",
       "created_at", "updated_at",
     ]);
@@ -657,21 +733,31 @@ export class PullSyncEngine {
       tenant_id: item.tenantId,
       deal_id: item.dealId,
       product_id: item.productId ?? null,
+      product_ids: item.productIds ? JSON.stringify(item.productIds) : "[]",
       category_id: item.categoryId ?? null,
+      variant_id: item.variantId ?? null,
+      product_type: item.productType ?? null,
+      name: item.name ?? null,
       role: item.role ?? "QUALIFIER",
-      quantity: item.quantityPerItem ?? 1,
+      quantity: item.minQuantity ?? 1,
+      quantity_per_item: item.quantityPerItem ?? 1,
       min_quantity: item.minQuantity ?? 1,
+      max_quantity: item.maxQuantity ?? null,
       discount_type: item.discountType ?? null,
       discount_value: item.discountValue ?? 0,
       sort_order: item.displayOrder ?? 0,
-      allow_pizza: 0,
+      allow_pizza: item.productType === "PIZZA" ? 1 : 0,
       allow_variant_selection: 0,
+      can_swap: item.canSwap ? 1 : 0,
+      swap_product_ids: item.swapProductIds ? JSON.stringify(item.swapProductIds) : "[]",
     }));
 
     const count = this.upsertRows("deal_items", rows, [
-      "id", "tenant_id", "deal_id", "product_id", "category_id", "role",
-      "quantity", "min_quantity", "discount_type", "discount_value",
+      "id", "tenant_id", "deal_id", "product_id", "product_ids", "category_id",
+      "variant_id", "product_type", "name", "role", "quantity", "quantity_per_item",
+      "min_quantity", "max_quantity", "discount_type", "discount_value",
       "sort_order", "allow_pizza", "allow_variant_selection",
+      "can_swap", "swap_product_ids",
     ]);
 
     this.updateSyncState("deal_items", count);
@@ -1042,13 +1128,14 @@ export class PullSyncEngine {
       extra_price: item.extraPrice ?? item.priceDouble ?? 0,
     }));
 
-    const count = this.upsertRows("pizza_topping_prices", rows, [
+    // Full replace — price tables pull ALL records, no cursor. Clear before insert to prevent duplicates.
+    this.replaceTable("pizza_topping_prices", rows, [
       "id", "tenant_id", "topping_id", "size_id", "product_id",
       "light_price", "regular_price", "extra_price",
     ]);
 
-    this.updateSyncState("pizza_topping_prices", count);
-    return { entity: "pizza_topping_prices", pulled: count, errors: [] };
+    this.updateSyncState("pizza_topping_prices", rows.length);
+    return { entity: "pizza_topping_prices", pulled: rows.length, errors: [] };
   }
 
   private async pullPizzaCrustPrices(): Promise<PullResult> {
@@ -1069,12 +1156,12 @@ export class PullSyncEngine {
       upcharge: item.upcharge ?? item.price ?? 0,
     }));
 
-    const count = this.upsertRows("pizza_crust_prices", rows, [
+    this.replaceTable("pizza_crust_prices", rows, [
       "id", "tenant_id", "crust_id", "size_id", "product_id", "upcharge",
     ]);
 
-    this.updateSyncState("pizza_crust_prices", count);
-    return { entity: "pizza_crust_prices", pulled: count, errors: [] };
+    this.updateSyncState("pizza_crust_prices", rows.length);
+    return { entity: "pizza_crust_prices", pulled: rows.length, errors: [] };
   }
 
   private async pullPizzaSaucePrices(): Promise<PullResult> {
@@ -1097,13 +1184,13 @@ export class PullSyncEngine {
       extra_price: item.extraPrice ?? 0,
     }));
 
-    const count = this.upsertRows("pizza_sauce_prices", rows, [
+    this.replaceTable("pizza_sauce_prices", rows, [
       "id", "tenant_id", "sauce_id", "size_id", "product_id",
       "light_price", "regular_price", "extra_price",
     ]);
 
-    this.updateSyncState("pizza_sauce_prices", count);
-    return { entity: "pizza_sauce_prices", pulled: count, errors: [] };
+    this.updateSyncState("pizza_sauce_prices", rows.length);
+    return { entity: "pizza_sauce_prices", pulled: rows.length, errors: [] };
   }
 
   private async pullPizzaCheesesPrices(): Promise<PullResult> {
@@ -1126,7 +1213,7 @@ export class PullSyncEngine {
       extra_price: item.extraPrice ?? 0,
     }));
 
-    const count = this.upsertRows("pizza_cheese_prices", rows, [
+    this.replaceTable("pizza_cheese_prices", rows, [
       "id", "tenant_id", "cheese_id", "size_id", "product_id",
       "light_price", "regular_price", "extra_price",
     ]);
@@ -1168,6 +1255,125 @@ export class PullSyncEngine {
       "id", "tenant_id", "location_id", "config_id", "is_enabled", "half_and_half_enabled", "data",
     ]);
     this.updateSyncState("pizza_location_config", count);
+
+    // Parse the `data` JSON blob and populate individual pizza entity tables
+    // (sizes, crusts, sauces, cheeses, toppings, toppingCategories)
+    for (const item of rawItems) {
+      const tenantId = item.tenantId;
+      const configId = item.configId;
+      const dataStr = typeof item.data === "string" ? item.data : JSON.stringify(item.data ?? "");
+      let parsed: Record<string, any>;
+      try {
+        parsed = JSON.parse(dataStr);
+      } catch {
+        continue;
+      }
+
+      // Pizza sizes
+      if (Array.isArray(parsed.sizes)) {
+        const sizeRows = parsed.sizes.map((s: any) => ({
+          id: s.id,
+          tenant_id: tenantId,
+          config_id: configId,
+          name: s.name ?? "",
+          code: s.code ?? null,
+          sort_order: s.displayOrder ?? 0,
+          is_default: s.isDefault ? 1 : 0,
+          is_active: s.isActive != null ? (s.isActive ? 1 : 0) : 1,
+          topping_price: s.toppingPrice ?? 0,
+          half_topping_price: s.halfToppingPrice ?? null,
+        }));
+        this.upsertRows("pizza_sizes", sizeRows, [
+          "id", "tenant_id", "config_id", "name", "code", "sort_order", "is_default", "is_active",
+          "topping_price", "half_topping_price",
+        ]);
+      }
+
+      // Pizza crusts
+      if (Array.isArray(parsed.crusts)) {
+        const crustRows = parsed.crusts.map((c: any) => ({
+          id: c.id,
+          tenant_id: tenantId,
+          config_id: configId,
+          name: c.name ?? "",
+          sort_order: c.displayOrder ?? 0,
+          is_default: c.isDefault ? 1 : 0,
+          is_active: c.isActive != null ? (c.isActive ? 1 : 0) : 1,
+        }));
+        this.upsertRows("pizza_crusts", crustRows, [
+          "id", "tenant_id", "config_id", "name", "sort_order", "is_default", "is_active",
+        ]);
+      }
+
+      // Pizza sauces
+      if (Array.isArray(parsed.sauces)) {
+        const sauceRows = parsed.sauces.map((s: any) => ({
+          id: s.id,
+          tenant_id: tenantId,
+          config_id: configId,
+          name: s.name ?? "",
+          sort_order: s.displayOrder ?? 0,
+          is_default: s.isDefault ? 1 : 0,
+          is_active: s.isActive != null ? (s.isActive ? 1 : 0) : 1,
+        }));
+        this.upsertRows("pizza_sauces", sauceRows, [
+          "id", "tenant_id", "config_id", "name", "sort_order", "is_default", "is_active",
+        ]);
+      }
+
+      // Pizza cheeses
+      if (Array.isArray(parsed.cheeses)) {
+        const cheeseRows = parsed.cheeses.map((c: any) => ({
+          id: c.id,
+          tenant_id: tenantId,
+          config_id: configId,
+          name: c.name ?? "",
+          sort_order: c.displayOrder ?? 0,
+          is_default: c.isDefault ? 1 : 0,
+          is_active: c.isActive != null ? (c.isActive ? 1 : 0) : 1,
+        }));
+        this.upsertRows("pizza_cheeses", cheeseRows, [
+          "id", "tenant_id", "config_id", "name", "sort_order", "is_default", "is_active",
+        ]);
+      }
+
+      // Pizza topping categories
+      if (Array.isArray(parsed.toppingCategories)) {
+        const catRows = parsed.toppingCategories.map((tc: any) => ({
+          id: tc.id,
+          tenant_id: tenantId,
+          config_id: configId,
+          name: tc.name ?? "",
+          sort_order: tc.displayOrder ?? 0,
+          is_premium: tc.isPremium ? 1 : 0,
+          is_active: tc.isActive != null ? (tc.isActive ? 1 : 0) : 1,
+        }));
+        this.upsertRows("pizza_topping_categories", catRows, [
+          "id", "tenant_id", "config_id", "name", "sort_order", "is_premium", "is_active",
+        ]);
+      }
+
+      // Pizza toppings
+      if (Array.isArray(parsed.toppings)) {
+        const toppingRows = parsed.toppings.map((t: any) => ({
+          id: t.id,
+          tenant_id: tenantId,
+          config_id: configId,
+          name: t.name ?? "",
+          category_id: t.categoryId ?? null,
+          sort_order: t.displayOrder ?? 0,
+          is_default: t.isDefault ? 1 : 0,
+          is_premium: t.isPremium ? 1 : 0,
+          is_active: t.isActive != null ? (t.isActive ? 1 : 0) : 1,
+          price_multiplier: t.priceMultiplier ?? 1.0,
+        }));
+        this.upsertRows("pizza_toppings", toppingRows, [
+          "id", "tenant_id", "config_id", "name", "category_id", "sort_order", "is_default", "is_premium", "is_active",
+          "price_multiplier",
+        ]);
+      }
+    }
+
     return { entity: "pizza_location_config", pulled: count, errors: [] };
   }
 

@@ -14,7 +14,7 @@ export function registerBootstrapRoutes(app: FastifyInstance) {
     const { terminalId } = req.query as Record<string, string>;
 
     // All queries run against local SQLite — instant, no network
-    const products = db.prepare("SELECT * FROM products WHERE tenant_id = ? AND is_active = 1").all(tenantId);
+    const products = db.prepare("SELECT *, base_price AS price, is_weighable AS is_weight_based, CASE WHEN product_type = 'PIZZA' THEN 1 ELSE 0 END AS is_pizza FROM products WHERE tenant_id = ? AND is_active = 1 ORDER BY name").all(tenantId);
     const productVariants = db.prepare("SELECT * FROM product_variants WHERE tenant_id = ? AND is_active = 1").all(tenantId);
     const productOrderTypePrices = db.prepare("SELECT * FROM product_order_type_prices WHERE tenant_id = ?").all(tenantId);
     const variantOrderTypePrices = db.prepare("SELECT * FROM variant_order_type_prices WHERE tenant_id = ?").all(tenantId);
@@ -28,18 +28,27 @@ export function registerBootstrapRoutes(app: FastifyInstance) {
     const dealItems = db.prepare("SELECT di.* FROM deal_items di JOIN deals d ON d.id = di.deal_id WHERE di.tenant_id = ? AND d.is_active = 1").all(tenantId);
     const dealTimeRestrictions = db.prepare("SELECT dtr.* FROM deal_time_restrictions dtr JOIN deals d ON d.id = dtr.deal_id WHERE d.tenant_id = ? AND d.is_active = 1").all(tenantId);
     const dealSizePrices = db.prepare("SELECT dsp.* FROM deal_size_prices dsp JOIN deals d ON d.id = dsp.deal_id WHERE d.tenant_id = ? AND d.is_active = 1").all(tenantId);
+    const dealSizeOrderTypePrices = db.prepare(`
+      SELECT dsop.* FROM deal_size_order_type_prices dsop
+      JOIN deal_size_prices dsp ON dsp.id = dsop.size_price_id
+      JOIN deals d ON d.id = dsp.deal_id
+      WHERE d.tenant_id = ? AND d.is_active = 1
+    `).all(tenantId);
     const giftCards = db.prepare("SELECT id, code, current_balance, is_active, expires_at FROM gift_cards WHERE tenant_id = ? AND is_active = 1 AND current_balance > 0").all(tenantId);
     const couponCodes = db.prepare("SELECT * FROM coupon_codes WHERE tenant_id = ? AND is_active = 1").all(tenantId);
-    const modifierGroups = db.prepare("SELECT * FROM modifier_groups WHERE tenant_id = ?").all(tenantId);
+    const modifierGroups = db.prepare("SELECT *, min_qty AS min_selections, max_qty AS max_selections FROM modifier_groups WHERE tenant_id = ?").all(tenantId);
     const modifiers = db.prepare(`
-      SELECT m.* FROM modifiers m
+      SELECT m.*, m.price_adjustment AS price FROM modifiers m
       JOIN modifier_groups mg ON mg.id = m.modifier_group_id
       WHERE mg.tenant_id = ? AND m.is_active = 1
     `).all(tenantId);
     const productModifierGroups = db.prepare(`
-      SELECT pmg.* FROM product_modifier_groups pmg
+      SELECT pmg.product_id, pmg.modifier_group_id, pmg.priority,
+             MAX(pmg.is_required) AS is_required, pmg.free_selections_override
+      FROM product_modifier_groups pmg
       JOIN products p ON p.id = pmg.product_id
       WHERE p.tenant_id = ?
+      GROUP BY pmg.product_id, pmg.modifier_group_id
     `).all(tenantId);
     const productKits = db.prepare("SELECT * FROM product_kits WHERE tenant_id = ? AND is_active = 1").all(tenantId);
     const productKitItems = db.prepare(`
@@ -88,6 +97,7 @@ export function registerBootstrapRoutes(app: FastifyInstance) {
         crustPrices: db.prepare("SELECT * FROM pizza_crust_prices WHERE tenant_id = ?").all(plc.tenant_id),
         saucePrices: db.prepare("SELECT * FROM pizza_sauce_prices WHERE tenant_id = ?").all(plc.tenant_id),
         cheesePrices: db.prepare("SELECT * FROM pizza_cheese_prices WHERE tenant_id = ?").all(plc.tenant_id),
+        productConfigs: db.prepare("SELECT * FROM pizza_product_configs WHERE tenant_id = ?").all(plc.tenant_id),
       };
     }
 
@@ -118,6 +128,7 @@ export function registerBootstrapRoutes(app: FastifyInstance) {
       dealItems,
       dealTimeRestrictions,
       dealSizePrices,
+      dealSizeOrderTypePrices,
       giftCards,
       couponCodes,
       modifierGroups,
