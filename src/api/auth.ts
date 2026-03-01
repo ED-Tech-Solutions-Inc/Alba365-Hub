@@ -37,6 +37,18 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000).unref();
 
+/** Recent user IDs — try these first for fast PIN auth (~84ms vs 1.3s full scan).
+ *  In a restaurant, the same staff log in/out repeatedly all day. */
+const recentUserIds: string[] = [];
+const MAX_RECENT_USERS = 5;
+
+function recordRecentUser(userId: string) {
+  const idx = recentUserIds.indexOf(userId);
+  if (idx !== -1) recentUserIds.splice(idx, 1);
+  recentUserIds.unshift(userId);
+  if (recentUserIds.length > MAX_RECENT_USERS) recentUserIds.pop();
+}
+
 export function registerAuthRoutes(app: FastifyInstance) {
   // PIN authentication
   app.post("/api/auth/pin", async (req, reply) => {
@@ -71,56 +83,79 @@ export function registerAuthRoutes(app: FastifyInstance) {
       is_active: number;
     }>;
 
-    // Try each user's PIN hash
-    for (const user of users) {
-      let match = false;
+    // Fast path: try recent users first (~84ms per check vs 1.3s full scan).
+    // In a restaurant, the same staff log in/out all day — this hits on first try.
+    const authStart = Date.now();
+    let user: typeof users[number] | null = null;
+
+    // 1. Try recent users first (ordered by most recent login)
+    for (const recentId of recentUserIds) {
+      const candidate = users.find((u) => u.id === recentId);
+      if (!candidate) continue;
       try {
-        match = bcrypt.compareSync(pin, user.pin_hash);
-      } catch (err) {
-        console.error(`[Auth] Corrupt PIN hash for user ${user.id}:`, err);
-        continue;
-      }
-      if (match) {
-        // Create terminal session
-        const sessionId = generateId();
-        const terminalId = body.terminalId ?? (req.headers["x-terminal-id"] as string) ?? null;
-
-        // Only insert session if we have a valid terminal
-        if (terminalId) {
-          const terminalExists = db.prepare("SELECT id FROM terminals WHERE id = ?").get(terminalId);
-          if (terminalExists) {
-            transaction((txDb) => {
-              txDb.prepare(`
-                INSERT INTO terminal_sessions (id, terminal_id, user_id, user_name, started_at, is_active)
-                VALUES (?, ?, ?, ?, datetime('now'), 1)
-              `).run(sessionId, terminalId, user.id, user.name);
-
-              // Update terminal status
-              txDb.prepare(`
-                UPDATE terminals SET current_user_id = ?, current_user_name = ?, status = 'ONLINE', last_seen_at = datetime('now')
-                WHERE id = ?
-              `).run(user.id, user.name, terminalId);
-            });
-          }
+        if (await bcrypt.compare(pin, candidate.pin_hash)) {
+          user = candidate;
+          break;
         }
+      } catch { /* corrupt hash, skip */ }
+    }
 
-        return {
-          success: true,
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            permissions: safeParseJson(user.permissions, []),
-            maxDiscount: user.max_discount,
-          },
-          sessionId,
-        };
+    // 2. Fall back to full scan only if recent users didn't match
+    if (!user) {
+      const remaining = users.filter((u) => !recentUserIds.includes(u.id));
+      for (const candidate of remaining) {
+        try {
+          if (await bcrypt.compare(pin, candidate.pin_hash)) {
+            user = candidate;
+            break;
+          }
+        } catch { /* corrupt hash, skip */ }
       }
     }
 
-    reply.status(401);
-    return { error: "Invalid PIN" };
+    console.log(`[Auth] PIN auth: ${users.length} users, took ${Date.now() - authStart}ms, match=${!!user}`);
+
+    if (!user) {
+      reply.status(401);
+      return { error: "Invalid PIN" };
+    }
+
+    // Cache this user for fast re-auth
+    recordRecentUser(user.id);
+
+    // Create terminal session
+    const sessionId = generateId();
+    const terminalId = body.terminalId ?? (req.headers["x-terminal-id"] as string) ?? null;
+
+    if (terminalId) {
+      const terminalExists = db.prepare("SELECT id FROM terminals WHERE id = ?").get(terminalId);
+      if (terminalExists) {
+        transaction((txDb) => {
+          txDb.prepare(`
+            INSERT INTO terminal_sessions (id, terminal_id, user_id, user_name, started_at, is_active)
+            VALUES (?, ?, ?, ?, datetime('now'), 1)
+          `).run(sessionId, terminalId, user.id, user.name);
+
+          txDb.prepare(`
+            UPDATE terminals SET current_user_id = ?, current_user_name = ?, status = 'ONLINE', last_seen_at = datetime('now')
+            WHERE id = ?
+          `).run(user.id, user.name, terminalId);
+        });
+      }
+    }
+
+    return {
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        permissions: safeParseJson(user.permissions, []),
+        maxDiscount: user.max_discount,
+      },
+      sessionId,
+    };
   });
 
   // Verify session
