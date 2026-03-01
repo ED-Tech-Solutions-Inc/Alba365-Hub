@@ -75,4 +75,25 @@ export function registerSyncRoutes(app: FastifyInstance) {
     const count = pushEngine.retryDeadLetters(entityType);
     return { retriedCount: count };
   });
+
+  // Reset sync cursors for specific entities (forces full re-fetch)
+  app.post("/api/sync/reset", async (req) => {
+    const db = getDb();
+    const { entities } = (req.query ?? {}) as { entities?: string };
+
+    if (entities) {
+      const entityList = entities.split(",").map((e) => e.trim());
+      const stmt = db.prepare("DELETE FROM sync_state WHERE entity_type = ?");
+      let cleared = 0;
+      for (const entity of entityList) {
+        const result = stmt.run(entity);
+        cleared += result.changes;
+      }
+      return { cleared, entities: entityList };
+    }
+
+    // Reset all
+    const result = db.prepare("DELETE FROM sync_state").run();
+    return { cleared: result.changes, entities: "all" };
+  });
 }

@@ -243,17 +243,32 @@ export class PullSyncEngine {
   }
 
   // --- Helper: Update sync state after successful pull ---
+  // Only advance last_synced_at when records were actually pulled.
+  // When 0 records returned, keep the existing cursor so new records
+  // created between syncs aren't permanently missed.
   private updateSyncState(entityType: string, recordCount: number) {
     const db = getDb();
-    db.prepare(`
-      INSERT INTO sync_state (entity_type, last_synced_at, record_count, status, updated_at)
-      VALUES (?, datetime('now'), ?, 'SUCCESS', datetime('now'))
-      ON CONFLICT(entity_type) DO UPDATE SET
-        last_synced_at = datetime('now'),
-        record_count = ?,
-        status = 'SUCCESS',
-        updated_at = datetime('now')
-    `).run(entityType, recordCount, recordCount);
+    if (recordCount > 0) {
+      db.prepare(`
+        INSERT INTO sync_state (entity_type, last_synced_at, record_count, status, updated_at)
+        VALUES (?, datetime('now'), ?, 'SUCCESS', datetime('now'))
+        ON CONFLICT(entity_type) DO UPDATE SET
+          last_synced_at = datetime('now'),
+          record_count = ?,
+          status = 'SUCCESS',
+          updated_at = datetime('now')
+      `).run(entityType, recordCount, recordCount);
+    } else {
+      // Still mark success + update timestamp, but DON'T advance the sync cursor
+      db.prepare(`
+        INSERT INTO sync_state (entity_type, last_synced_at, record_count, status, updated_at)
+        VALUES (?, datetime('now'), 0, 'SUCCESS', datetime('now'))
+        ON CONFLICT(entity_type) DO UPDATE SET
+          record_count = 0,
+          status = 'SUCCESS',
+          updated_at = datetime('now')
+      `).run(entityType);
+    }
   }
 
   // --- Helper: Generic upsert for reference data ---
