@@ -1619,7 +1619,11 @@ export class PullSyncEngine {
   }
 
   private async pullKitchenOrderItems(): Promise<PullResult> {
-    const res = await this.cloudClient.get<PaginatedResponse>("/api/hub/sync/kitchen-order-items", {});
+    const state = this.getSyncState("kitchen_order_items");
+    const params: Record<string, string> = {};
+    if (state.last_synced_at) params.sinceVersion = state.last_synced_at;
+
+    const res = await this.cloudClient.get<PaginatedResponse>("/api/hub/sync/kitchen-order-items", params);
     if (!res.ok) {
       if (res.status === 404) return { entity: "kitchen_order_items", pulled: 0, errors: [] };
       return { entity: "kitchen_order_items", pulled: 0, errors: [res.error ?? `HTTP ${res.status}`] };
