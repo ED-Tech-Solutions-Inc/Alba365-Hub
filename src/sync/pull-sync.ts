@@ -1218,8 +1218,8 @@ export class PullSyncEngine {
       "light_price", "regular_price", "extra_price",
     ]);
 
-    this.updateSyncState("pizza_cheese_prices", count);
-    return { entity: "pizza_cheese_prices", pulled: count, errors: [] };
+    this.updateSyncState("pizza_cheese_prices", rows.length);
+    return { entity: "pizza_cheese_prices", pulled: rows.length, errors: [] };
   }
 
   // ===================================================================
