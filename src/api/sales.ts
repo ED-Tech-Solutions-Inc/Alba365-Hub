@@ -117,6 +117,57 @@ export function registerSaleRoutes(app: FastifyInstance) {
     return db.prepare(sql).all(...params);
   });
 
+  // Lookup sale by receipt number (for refund flow)
+  app.get("/api/sales/lookup", async (req, reply) => {
+    const { receiptNumber } = req.query as Record<string, string>;
+    if (!receiptNumber) {
+      reply.status(400);
+      return { error: "receiptNumber query parameter is required" };
+    }
+
+    const db = getDb();
+    const sale = db.prepare("SELECT * FROM sales WHERE receipt_number = ? AND location_id = ?")
+      .get(receiptNumber, config.locationId ?? "");
+    if (!sale) {
+      reply.status(404);
+      return { error: "Sale not found" };
+    }
+
+    const saleRecord = sale as Record<string, unknown>;
+    const items = db.prepare("SELECT * FROM sale_items WHERE sale_id = ?").all(saleRecord.id as string);
+    const payments = db.prepare("SELECT * FROM payments WHERE sale_id = ?").all(saleRecord.id as string);
+
+    // Check existing refunds for this sale (to calculate already-refunded quantities)
+    const refunds = db.prepare("SELECT id, status FROM refunds WHERE sale_id = ? AND status IN ('APPROVED', 'COMPLETED', 'PENDING_APPROVAL')")
+      .all(saleRecord.id as string) as Array<{ id: string; status: string }>;
+    const refundItems: Array<Record<string, unknown>> = [];
+    for (const r of refunds) {
+      const ri = db.prepare("SELECT * FROM refund_items WHERE refund_id = ?").all(r.id);
+      refundItems.push(...(ri as Array<Record<string, unknown>>));
+    }
+
+    // Get refund settings
+    const settings = db.prepare("SELECT * FROM location_settings WHERE location_id = ?")
+      .get(config.locationId ?? "") as Record<string, unknown> | undefined;
+    const refundWindowDays = (settings?.refund_window_days as number) ?? 30;
+    const approvalLimit = (settings?.refund_auto_approve_limit as number) ?? 50;
+
+    const createdAt = saleRecord.created_at as string;
+    const daysSinceSale = createdAt
+      ? Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24))
+      : 0;
+
+    return {
+      ...saleRecord,
+      items,
+      payments,
+      refundItems,
+      refundWindowDays,
+      daysSinceSale,
+      approvalLimit,
+    };
+  });
+
   // Get sale details
   app.get("/api/sales/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
