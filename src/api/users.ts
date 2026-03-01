@@ -116,32 +116,50 @@ export function registerUserRoutes(app: FastifyInstance) {
   app.get("/api/users/delivery-balances", async () => {
     const db = getDb();
     // Sum delivery compensation from sales not yet paid out
-    const balances = db.prepare(`
-      SELECT s.server_id as userId, u.name as userName,
-        SUM(CASE WHEN s.order_type = 'DELIVERY' THEN COALESCE(s.gratuity, 0) ELSE 0 END) as unpaidTips,
-        COUNT(CASE WHEN s.order_type = 'DELIVERY' THEN 1 END) as deliveryCount
+    const rows = db.prepare(`
+      SELECT s.cashier_id as user_id, u.name as user_name,
+        SUM(COALESCE(s.gratuity, 0)) as unpaid_tips,
+        SUM(COALESCE(s.driver_compensation, 0)) as unpaid_comp,
+        COUNT(*) as delivery_count
       FROM sales s
-      LEFT JOIN users u ON u.id = s.server_id
-      WHERE s.location_id = ? AND s.order_type = 'DELIVERY' AND s.server_id IS NOT NULL
-      GROUP BY s.server_id
-      HAVING unpaidTips > 0
-    `).all(config.locationId ?? "");
-    return balances;
+      LEFT JOIN users u ON u.id = s.cashier_id
+      WHERE s.location_id = ? AND s.order_type = 'DELIVERY' AND s.cashier_id IS NOT NULL
+        AND (COALESCE(s.gratuity, 0) > 0 OR COALESCE(s.driver_compensation, 0) > 0)
+      GROUP BY s.cashier_id
+    `).all(config.locationId ?? "") as Array<Record<string, unknown>>;
+
+    return rows.map((r) => ({
+      staffId: r.user_id,
+      name: r.user_name,
+      orderCount: r.delivery_count,
+      tips: r.unpaid_tips,
+      compensation: r.unpaid_comp,
+      total: ((r.unpaid_tips as number) || 0) + ((r.unpaid_comp as number) || 0),
+    }));
   });
 
   // Recent payout history
   app.get("/api/users/payout-history", async (req) => {
     const { limit } = req.query as Record<string, string>;
     const db = getDb();
-    const payouts = db.prepare(`
-      SELECT t.*, u.name as userName
+    const rows = db.prepare(`
+      SELECT t.id, t.amount, t.reference as method, t.reason, t.created_at,
+        u.name as staff_name
       FROM staff_bank_transactions t
       LEFT JOIN staff_banks b ON b.id = t.staff_bank_id
       LEFT JOIN users u ON u.id = t.user_id
       WHERE b.location_id = ? AND t.type = 'PAYOUT'
       ORDER BY t.created_at DESC LIMIT ?
-    `).all(config.locationId ?? "", clampLimit(limit, 20, 200));
-    return payouts;
+    `).all(config.locationId ?? "", clampLimit(limit, 20, 200)) as Array<Record<string, unknown>>;
+
+    return rows.map((r) => ({
+      id: r.id,
+      staffName: r.staff_name,
+      amount: r.amount,
+      method: r.method,
+      createdAt: r.created_at,
+      reason: r.reason,
+    }));
   });
 
   // Get current user's assignment (role + permissions)
