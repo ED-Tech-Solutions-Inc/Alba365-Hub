@@ -195,6 +195,8 @@ export function initializeSchema(db: Database.Database): void {
       product_type TEXT DEFAULT 'STANDARD',
       is_active INTEGER DEFAULT 1,
       is_weighable INTEGER DEFAULT 0,
+      pricing_strategy TEXT DEFAULT 'FIXED',
+      weight_unit TEXT,
       track_inventory INTEGER DEFAULT 0,
       image_url TEXT,
       sort_order INTEGER DEFAULT 0,
@@ -1554,6 +1556,11 @@ export function initializeSchema(db: Database.Database): void {
     "ALTER TABLE deal_items ADD COLUMN max_quantity INTEGER",
     "ALTER TABLE deal_items ADD COLUMN can_swap INTEGER DEFAULT 0",
     "ALTER TABLE deal_items ADD COLUMN swap_product_ids TEXT DEFAULT '[]'",
+    // products: add pricing_strategy and weight_unit for weight-based items
+    "ALTER TABLE products ADD COLUMN pricing_strategy TEXT DEFAULT 'FIXED'",
+    "ALTER TABLE products ADD COLUMN weight_unit TEXT",
+    // product_kit_items: add tenant_id for sync
+    "ALTER TABLE product_kit_items ADD COLUMN tenant_id TEXT",
   ];
 
   for (const sql of migrations) {

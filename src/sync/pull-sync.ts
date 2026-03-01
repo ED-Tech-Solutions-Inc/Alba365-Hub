@@ -167,6 +167,8 @@ export class PullSyncEngine {
         { name: "modifier_groups", pull: () => this.pullModifierGroups() },
         { name: "modifiers", pull: () => this.pullModifiers() },
         { name: "product_modifier_groups", pull: () => this.pullProductModifierGroups() },
+        { name: "product_kits", pull: () => this.pullProductKits() },
+        { name: "product_kit_items", pull: () => this.pullProductKitItems() },
         { name: "discount_templates", pull: () => this.pullDiscountTemplates() },
         { name: "gift_cards", pull: () => this.pullGiftCards() },
         { name: "coupon_codes", pull: () => this.pullCouponCodes() },
@@ -403,7 +405,10 @@ export class PullSyncEngine {
       cost_price: item.cost ?? 0,
       tax_type_ids: item.taxTypeIds ? JSON.stringify(item.taxTypeIds) : "[]",
       product_type: item.productType ?? "STANDARD",
+      pricing_strategy: item.pricingStrategy ?? "FIXED",
+      weight_unit: item.weightUnit ?? null,
       is_active: item.isActive ? 1 : 0,
+      is_weighable: item.pricingStrategy === "WEIGHT" ? 1 : 0,
       track_inventory: item.trackInventory ? 1 : 0,
       image_url: item.imageUrl ?? null,
       sort_order: item.sortOrder ?? 0,
@@ -415,7 +420,8 @@ export class PullSyncEngine {
     const count = this.upsertRows("products", rows, [
       "id", "tenant_id", "name", "sku", "barcode", "category_id", "description",
       "base_price", "cost_price", "tax_type_ids", "product_type",
-      "is_active", "track_inventory", "image_url", "sort_order", "metadata",
+      "pricing_strategy", "weight_unit", "is_active", "is_weighable",
+      "track_inventory", "image_url", "sort_order", "metadata",
       "created_at", "updated_at",
     ]);
 
@@ -497,6 +503,59 @@ export class PullSyncEngine {
 
     this.updateSyncState("product_variants", count);
     return { entity: "product_variants", pulled: count, errors: [] };
+  }
+
+  private async pullProductKits(): Promise<PullResult> {
+    const state = this.getSyncState("product_kits");
+    const params: Record<string, string> = {};
+    if (state.last_synced_at) params.sinceVersion = state.last_synced_at;
+
+    const res = await this.cloudClient.get<PaginatedResponse>("/api/hub/sync/product-kits", params);
+    if (!res.ok) return { entity: "product_kits", pulled: 0, errors: [res.error ?? `HTTP ${res.status}`] };
+
+    const rawItems = extractItems(res.data);
+
+    const rows = rawItems.map((item) => ({
+      id: item.id,
+      tenant_id: item.tenantId,
+      name: item.name,
+      category_id: item.categoryId ?? null,
+      price: item.price ?? 0,
+      is_active: item.isActive ? 1 : 0,
+      created_at: item.createdAt ?? null,
+      updated_at: item.updatedAt ?? null,
+    }));
+
+    const count = this.upsertRows("product_kits", rows, [
+      "id", "tenant_id", "name", "category_id", "price", "is_active",
+      "created_at", "updated_at",
+    ]);
+
+    this.updateSyncState("product_kits", count);
+    return { entity: "product_kits", pulled: count, errors: [] };
+  }
+
+  private async pullProductKitItems(): Promise<PullResult> {
+    const res = await this.cloudClient.get<PaginatedResponse>("/api/hub/sync/product-kit-items", {});
+    if (!res.ok) return { entity: "product_kit_items", pulled: 0, errors: [res.error ?? `HTTP ${res.status}`] };
+
+    const rawItems = extractItems(res.data);
+
+    const rows = rawItems.map((item) => ({
+      id: item.id,
+      tenant_id: item.tenantId ?? null,
+      kit_id: item.kitId,
+      product_id: item.productId,
+      quantity: item.quantity ?? 1,
+      sort_order: item.sortOrder ?? 0,
+    }));
+
+    const count = this.upsertRows("product_kit_items", rows, [
+      "id", "tenant_id", "kit_id", "product_id", "quantity", "sort_order",
+    ]);
+
+    this.updateSyncState("product_kit_items", count);
+    return { entity: "product_kit_items", pulled: count, errors: [] };
   }
 
   private async pullTaxTypes(): Promise<PullResult> {

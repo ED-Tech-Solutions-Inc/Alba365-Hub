@@ -14,7 +14,7 @@ export function registerBootstrapRoutes(app: FastifyInstance) {
     const { terminalId } = req.query as Record<string, string>;
 
     // All queries run against local SQLite — instant, no network
-    const products = db.prepare("SELECT *, base_price AS price, is_weighable AS is_weight_based, CASE WHEN product_type = 'PIZZA' THEN 1 ELSE 0 END AS is_pizza FROM products WHERE tenant_id = ? AND is_active = 1 ORDER BY name").all(tenantId);
+    const products = db.prepare("SELECT *, base_price AS price, is_weighable AS is_weight_based, weight_unit, pricing_strategy, CASE WHEN product_type = 'PIZZA' THEN 1 ELSE 0 END AS is_pizza FROM products WHERE tenant_id = ? AND is_active = 1 ORDER BY name").all(tenantId);
     const productVariants = db.prepare("SELECT * FROM product_variants WHERE tenant_id = ? AND is_active = 1").all(tenantId);
     const productOrderTypePrices = db.prepare("SELECT * FROM product_order_type_prices WHERE tenant_id = ?").all(tenantId);
     const variantOrderTypePrices = db.prepare("SELECT * FROM variant_order_type_prices WHERE tenant_id = ?").all(tenantId);
